@@ -1,0 +1,22 @@
+commit 5135bed7aa5b7a5426c273cdf3db6f32536f698e
+Author: Denys Vlasenko <vda.linux@googlemail.com>
+Date:   Tue Aug 17 18:57:56 2010 +0200
+
+    RHTSupport: add a status message to reduce user confusion
+    
+    Signed-off-by: Denys Vlasenko <vda.linux@googlemail.com>
+
+diff --git a/lib/plugins/RHTSupport.cpp b/lib/plugins/RHTSupport.cpp
+index 0db227b..313d426 100644
+--- a/lib/Plugins/RHTSupport.cpp
++++ b/lib/Plugins/RHTSupport.cpp
+@@ -110,6 +110,9 @@ string CReporterRHticket::Report(const map_crash_data_t& pCrashData,
+         const map_plugin_settings_t& pSettings,
+         const char *pArgs)
+ {
++    /* Gzipping e.g. 0.5gig coredump takes a while. Let client know what we are doing */
++    update_client(_("Compressing data"));
++
+     string retval;
+ 
+     map_plugin_settings_t::const_iterator end = pSettings.end();

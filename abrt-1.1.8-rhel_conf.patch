@@ -1,0 +1,22 @@
+--- abrt-1.1.10/src/Daemon/abrt.conf	2010-06-30 15:08:48.000000000 +0200
++++ abrt-1.1.10_rhel6/src/Daemon/abrt.conf	2010-07-21 10:58:25.819194913 +0200
+@@ -38,15 +38,15 @@
+ #
+ #ActionsAndReporters = Mailx("[abrt] new crash was detected")
+ #ActionsAndReporters = FileTransfer("store")
+-ActionsAndReporters = RunApp("test x\"`cat component`\" = x\"xorg-x11-server-Xorg\" && cp /var/log/Xorg.0.log .")
++ActionsAndReporters = SOSreport
+ 
+ 
+ # What actions or reporters to run on each crash type
+ #
+ [ AnalyzerActionsAndReporters ]
+-Kerneloops = KerneloopsReporter
+-CCpp = Bugzilla, Logger
+-Python = Bugzilla, Logger
++Kerneloops = RHTSupport, Logger
++CCpp = RHTSupport, Logger
++Python = RHTSupport, Logger
+ #CCpp:xorg-x11-apps = RunApp("date", "date.txt")
+ 
+ 

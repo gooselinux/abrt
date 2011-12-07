@@ -1,0 +1,11 @@
+--- abrt-1.1.10/lib/Plugins/CCpp.conf	2010-06-30 15:10:49.000000000 +0200
++++ abrt-1.1.10_rhel6/lib/Plugins/CCpp.conf	2010-07-28 12:01:24.057516890 +0200
+@@ -30,7 +30,7 @@
+ 
+ # If this option is set to "yes",
+ # debuginfos will be installed to @@LOCALSTATEDIR@@/cache/abrt-di
+-InstallDebugInfo = yes
++InstallDebugInfo = no
+ 
+ # Additional directories to search for debuginfos.
+ # For example, you can list a network-mounted shared store

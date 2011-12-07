@@ -1,0 +1,47 @@
+commit 8ea8b95984058f6469bf813746f1d7472300aa4d
+Author: Denys Vlasenko <dvlasenk@redhat.com>
+Date:   Tue Aug 24 13:08:52 2010 +0200
+
+    fix 305 redirect problem
+
+    Signed-off-by: Denys Vlasenko <dvlasenk@redhat.com>
+
+diff --git a/lib/utils/abrt_curl.cpp b/lib/Utils/abrt_curl.cpp
+index 52688ac..a836f70 100644
+--- a/lib/utils/abrt_curl.cpp
++++ b/lib/Utils/abrt_curl.cpp
+@@ -303,6 +303,11 @@ abrt_post(abrt_post_state_t *state,
+         xcurl_easy_setopt_ptr(handle, CURLOPT_HTTPHEADER, httpheader_list);
+     }
+
++// Disabled: was observed to also handle "305 Use proxy" redirect,
++// apparently with POST->GET remapping - which server didn't like at all.
++// Attempted to suppress remapping on 305 using CURLOPT_POSTREDIR of -1,
++// but it still did not work.
++#if 0
+     // Please handle 301/302 redirects for me
+     xcurl_easy_setopt_long(handle, CURLOPT_FOLLOWLOCATION, 1);
+     xcurl_easy_setopt_long(handle, CURLOPT_MAXREDIRS, 10);
+@@ -315,7 +320,8 @@ abrt_post(abrt_post_state_t *state,
+     // The non-RFC behaviour is ubiquitous in web browsers, so the library
+     // does the conversion by default to maintain consistency.
+     // However, a server may require a POST to remain a POST.
+-    //xcurl_easy_setopt_long(CURLOPT_POSTREDIR, CURL_REDIR_POST_ALL);
++    xcurl_easy_setopt_long(handle, CURLOPT_POSTREDIR, -1L /*CURL_REDIR_POST_ALL*/ );
++#endif
+
+     // Prepare for saving information
+     if (state->flags & ABRT_POST_WANT_HEADERS)
+diff --git a/lib/utils/abrt_rh_support.cpp b/lib/Utils/abrt_rh_support.cpp
+index 4a1d80f..fd78a42 100644
+--- a/lib/utils/abrt_rh_support.cpp
++++ b/lib/Utils/abrt_rh_support.cpp
+@@ -397,6 +397,8 @@ send_report_to_new_case(const char* baseURL,
+     char *case_location = find_header_in_abrt_post_state(case_state, "Location:");
+     switch (case_state->http_resp_code)
+     {
++    case 301: /* "301 Moved Permanently" (for example, used to move http:// to https://) */
++    case 302: /* "302 Found" (just in case) */
+     case 305: /* "305 Use Proxy" */
+         if (++redirect_count < 10 && case_location) {
+             case_url = case_location;

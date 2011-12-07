@@ -1,0 +1,12 @@
+diff -urpN abrt-1.1.7/src/Daemon/gpg_keys abrt-1.1.7_rhel6/src/Daemon/gpg_keys
+--- abrt-1.1.7/src/Daemon/gpg_keys	2010-06-11 20:37:06.000000000 +0200
++++ abrt-1.1.7_rhel6/src/Daemon/gpg_keys	2010-06-23 14:59:41.232152787 +0200
+@@ -1 +1,7 @@
+-/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora
++/etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-beta-2
++/etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-auxiliary
++/etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-beta-2
++/etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-legacy-beta
++/etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-legacy-former
++/etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-legacy-release
++/etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-legacy-rhx

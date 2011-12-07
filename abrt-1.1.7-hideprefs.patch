@@ -1,0 +1,12 @@
+diff -urpN abrt-1.1.7/src/Gui/ccgui.glade abrt-1.1.7_rhel6/src/Gui/ccgui.glade
+--- abrt-1.1.7/src/Gui/ccgui.glade	2010-06-11 20:37:06.000000000 +0200
++++ abrt-1.1.7_rhel6/src/Gui/ccgui.glade	2010-06-23 14:57:34.337187107 +0200
+@@ -103,7 +103,7 @@ M&#xE1;ir&#xED;n Duffy &lt;duffy@redhat.
+                     <child>
+                       <widget class="GtkImageMenuItem" id="miPreferences">
+                         <property name="label">gtk-preferences</property>
+-                        <property name="visible">True</property>
++                        <property name="visible">False</property>
+                         <property name="use_underline">True</property>
+                         <property name="use_stock">True</property>
+                         <property name="always_show_image">True</property>

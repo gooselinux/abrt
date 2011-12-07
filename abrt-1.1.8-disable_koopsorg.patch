@@ -1,0 +1,41 @@
+--- abrt-1.1.8/lib/Plugins/Makefile.am	2010-06-30 16:27:56.000000000 +0200
++++ abrt-1.1.8_rhel6/lib/Plugins/Makefile.am	2010-06-30 17:25:35.145246660 +0200
+@@ -7,7 +7,6 @@
+     libLogger.la \
+     libKerneloopsScanner.la\
+     libKerneloops.la \
+-    libKerneloopsReporter.la \
+     libRunApp.la \
+     libSOSreport.la \
+     libBugzilla.la \
+@@ -21,8 +20,7 @@
+     Mailx.glade \
+     Bugzilla.glade \
+     RHTSupport.glade \
+-    ReportUploader.glade \
+-    KerneloopsReporter.glade
++    ReportUploader.glade
+ 
+ pluginsconfdir = $(PLUGINS_CONF_DIR)
+ dist_pluginsconf_DATA = \
+@@ -42,7 +40,6 @@
+     abrt-FileTransfer.7 \
+     abrt-Bugzilla.7 \
+     abrt-KerneloopsScanner.7 \
+-    abrt-KerneloopsReporter.7 \
+     abrt-Logger.7 \
+     abrt-Mailx.7 \
+     abrt-plugins.7 \
+@@ -76,12 +73,6 @@
+ libKerneloops_la_LDFLAGS = -avoid-version
+ libKerneloops_la_CPPFLAGS = -I$(srcdir)/../../inc -I$(srcdir)/../Utils
+ 
+-# KerneloopsReporter
+-libKerneloopsReporter_la_SOURCES = KerneloopsReporter.cpp KerneloopsReporter.h
+-libKerneloopsReporter_la_LDFLAGS = -avoid-version
+-libKerneloopsReporter_la_LIBADD = $(CURL_LIBS)
+-libKerneloopsReporter_la_CPPFLAGS = -I$(srcdir)/../../inc -I$(srcdir)/../Utils $(CURL_CFLAGS) -DPLUGINS_LIB_DIR=\"$(PLUGINS_LIB_DIR)\"
+-
+ # KerneloopsScanner
+ libKerneloopsScanner_la_SOURCES = KerneloopsScanner.cpp KerneloopsScanner.h KerneloopsSysLog.cpp KerneloopsSysLog.h
+ libKerneloopsScanner_la_LDFLAGS = -avoid-version

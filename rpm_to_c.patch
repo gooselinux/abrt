@@ -1,0 +1,612 @@
+commit 952420f6b5843e7f16474e3fd288bd8585c05373
+Author: Nikola Pajkovsky <npajkovs@redhat.com>
+Date:   Thu Aug 5 10:29:29 2010 +0200
+
+    rewrite rpm to pure C
+    
+    Signed-off-by: Nikola Pajkovsky <npajkovs@redhat.com>
+
+diff --git a/src/Daemon/Daemon.cpp b/src/Daemon/Daemon.cpp
+index 3557eed..86f0fce 100644
+--- a/src/Daemon/Daemon.cpp
++++ b/src/Daemon/Daemon.cpp
+@@ -43,6 +43,7 @@
+ #include "debug_dump.h"
+ #include "Daemon.h"
+ #include "dumpsocket.h"
++#include "RPM.h"
+ 
+ using namespace std;
+ 
+@@ -852,6 +853,9 @@ int main(int argc, char** argv)
+         if (env.fault_occurred)
+             error_msg_and_die("XML-RPC Fault: %s(%d)", env.fault_string, env.fault_code);
+ 
++        VERB1 log("Initializing rpm library");
++        rpm_init();
++
+         VERB1 log("Creating glib main loop");
+         pMainloop = g_main_loop_new(NULL, FALSE);
+         /* Watching DEBUG_DUMPS_DIR for new files... */
+@@ -960,6 +964,7 @@ int main(int argc, char** argv)
+      * Take care to not undo things we did not do.
+      */
+     dumpsocket_shutdown();
++    rpm_destroy();
+     if (pidfile_created)
+         unlink(VAR_RUN_PIDFILE);
+     if (lockfile_created)
+diff --git a/src/Daemon/MiddleWare.cpp b/src/Daemon/MiddleWare.cpp
+index c2a5fd6..e601038 100644
+--- a/src/Daemon/MiddleWare.cpp
++++ b/src/Daemon/MiddleWare.cpp
+@@ -38,12 +38,6 @@ using namespace std;
+  * @see PluginManager.h
+  */
+ CPluginManager* g_pPluginManager;
+-/**
+- * An instance of CRPM used for package checking.
+- * @see RPM.h
+- */
+-static CRPM s_RPM;
+-
+ 
+ /**
+  * A map, which associates particular analyzer to one or more
+@@ -600,7 +594,7 @@ static bool is_debug_dump_saved(long uid, const char *debug_dump_dir)
+ void LoadOpenGPGPublicKey(const char* key)
+ {
+     VERB1 log("Loading GPG key '%s'", key);
+-    s_RPM.LoadOpenGPGPublicKey(key);
++    rpm_load_gpgkey(key);
+ }
+ 
+ /**
+@@ -670,14 +664,15 @@ static mw_result_t SavePackageDescriptionToDebugDump(
+                 bool remote,
+                 const char *pDebugDumpDir)
+ {
+-    std::string package;
++    char* rpm_pkg = NULL;
+     char* packageName = NULL;
+-    std::string component;
++    char* component = NULL;
+     std::string scriptName; /* only if "interpreter /path/to/script" */
+ 
+     if (strcmp(pExecutable, "kernel") == 0)
+     {
+-        component = package = "kernel";
++        component = xstrdup("kernel");
++        rpm_pkg = xstrdup("kernel");
+         packageName = xstrdup("kernel");
+     }
+     else
+@@ -688,7 +683,7 @@ static mw_result_t SavePackageDescriptionToDebugDump(
+             return MW_BLACKLISTED;
+         }
+ 
+-        char *rpm_pkg = GetPackage(pExecutable);
++        rpm_pkg = rpm_get_package_nvr(pExecutable);
+         if (rpm_pkg == NULL)
+         {
+             if (g_settings_bProcessUnpackaged || remote)
+@@ -737,7 +732,7 @@ static mw_result_t SavePackageDescriptionToDebugDump(
+             char *script_name = get_argv1_if_full_path(cmdline);
+             if (script_name)
+             {
+-                char *script_pkg = GetPackage(script_name);
++                char *script_pkg = rpm_get_package_nvr(script_name);
+                 if (script_pkg)
+                 {
+                     /* There is a well-formed script name in argv[1],
+@@ -767,10 +762,8 @@ static mw_result_t SavePackageDescriptionToDebugDump(
+             }
+         }
+ 
+-        package = rpm_pkg;
+-        packageName = get_package_name_from_NVR_or_NULL(package.c_str());
++        packageName = get_package_name_from_NVR_or_NULL(rpm_pkg);
+         VERB2 log("Package:'%s' short:'%s'", rpm_pkg, packageName);
+-        free(rpm_pkg);
+ 
+         if (g_settings_setBlackListedPkgs.find(packageName) != g_settings_setBlackListedPkgs.end())
+         {
+@@ -780,7 +773,7 @@ static mw_result_t SavePackageDescriptionToDebugDump(
+         }
+         if (g_settings_bOpenGPGCheck && !remote)
+         {
+-            if (!s_RPM.CheckFingerprint(packageName))
++            if (rpm_chk_fingerprint(packageName))
+             {
+                 log("Package '%s' isn't signed with proper key", packageName);
+                 free(packageName);
+@@ -790,6 +783,8 @@ static mw_result_t SavePackageDescriptionToDebugDump(
+               Checking the MD5 sum requires to run prelink to "un-prelink" the
+               binaries - this is considered potential security risk so we don't
+               use it, until we find some non-intrusive way
++
++              Delete?
+             */
+             /*
+             if (!CheckHash(packageName.c_str(), pExecutable))
+@@ -801,10 +796,10 @@ static mw_result_t SavePackageDescriptionToDebugDump(
+             }
+             */
+         }
+-        component = GetComponent(pExecutable);
++        component = rpm_get_component(pExecutable);
+     }
+ 
+-    std::string description = GetDescription(packageName);
++    char *dsc = rpm_get_description(packageName);
+     free(packageName);
+ 
+     char host[HOST_NAME_MAX + 1];
+@@ -824,9 +819,24 @@ static mw_result_t SavePackageDescriptionToDebugDump(
+     {
+         CDebugDump dd;
+         dd.Open(pDebugDumpDir);
+-        dd.SaveText(FILENAME_PACKAGE, package.c_str());
+-        dd.SaveText(FILENAME_DESCRIPTION, description.c_str());
+-        dd.SaveText(FILENAME_COMPONENT, component.c_str());
++        if (rpm_pkg)
++        {
++            dd.SaveText(FILENAME_PACKAGE, rpm_pkg);
++            free(rpm_pkg);
++        }
++
++        if (dsc)
++        {
++            dd.SaveText(FILENAME_DESCRIPTION, dsc);
++            free(dsc);
++        }
++
++        if (component)
++        {
++            dd.SaveText(FILENAME_COMPONENT, component);
++            free(component);
++        }
++
+         if (!remote)
+             dd.SaveText(FILENAME_HOSTNAME, host);
+     }
+diff --git a/src/Daemon/RPM.cpp b/src/Daemon/RPM.cpp
+index fd25b49..60f896a 100644
+--- a/src/Daemon/RPM.cpp
++++ b/src/Daemon/RPM.cpp
+@@ -18,180 +18,206 @@
+ */
+ #include "abrtlib.h"
+ #include "RPM.h"
++#include <rpm/header.h>
++#include <rpm/rpmts.h>
+ #include "comm_layer_inner.h"
++#include <glib.h>
+ 
+-CRPM::CRPM()
++/**
++* A set, which contains finger prints.
++*/
++
++static GList *list_fingerprints = NULL;
++
++void rpm_init()
+ {
+-    static const char *const argv[] = { "", NULL };
+-    m_poptContext = rpmcliInit(1, (char**)argv, NULL);
++    int status = rpmReadConfigFiles((const char*)NULL, (const char*)NULL);
++    if (status != 0)
++        error_msg("error reading rc files");
++
++    list_fingerprints = g_list_alloc();
+ }
+ 
+-CRPM::~CRPM()
++static void list_free(gpointer data, gpointer user_data)
++{
++    free(data);
++}
++
++void rpm_destroy()
+ {
+-    rpmFreeCrypto();
+     rpmFreeRpmrc();
+-    rpmcliFini(m_poptContext);
++    rpmFreeCrypto();
++
++    g_list_foreach(list_fingerprints, list_free, NULL);
++    g_list_free(list_fingerprints);
+ }
+ 
+-void CRPM::LoadOpenGPGPublicKey(const char* pFileName)
++void rpm_load_gpgkey(const char* filename)
+ {
+-    uint8_t* pkt = NULL;
++    uint8_t *pkt = NULL;
+     size_t pklen;
+-    pgpKeyID_t keyID;
+-    if (pgpReadPkts(pFileName, &pkt, &pklen) != PGPARMOR_PUBKEY)
++    if (pgpReadPkts(filename, &pkt, &pklen) != PGPARMOR_PUBKEY)
+     {
+         free(pkt);
+-        error_msg("Can't load public GPG key %s", pFileName);
++        error_msg("Can't load public GPG key %s", filename);
+         return;
+     }
++
++    uint8_t keyID[8];
+     if (pgpPubkeyFingerprint(pkt, pklen, keyID) == 0)
+     {
+-        char* fedoraFingerprint = pgpHexStr(keyID, sizeof(keyID));
+-        if (fedoraFingerprint != NULL)
+-        {
+-            m_setFingerprints.insert(fedoraFingerprint);
+-            free(fedoraFingerprint);
+-        }
++        char *fingerprint = pgpHexStr(keyID, sizeof(keyID));
++        if (fingerprint != NULL)
++            g_list_append(list_fingerprints, fingerprint);
+     }
+     free(pkt);
+ }
+ 
+-bool CRPM::CheckFingerprint(const char* pPackage)
++bool rpm_chk_fingerprint(const char* pkg)
+ {
+     bool ret = false;
++    char *pgpsig = NULL;
++    const char *errmsg = NULL;
++
+     rpmts ts = rpmtsCreate();
+-    rpmdbMatchIterator iter = rpmtsInitIterator(ts, RPMTAG_NAME, pPackage, 0);
++    rpmdbMatchIterator iter = rpmtsInitIterator(ts, RPMTAG_NAME, pkg, 0);
+     Header header = rpmdbNextIterator(iter);
+ 
+-    if (header != NULL)
++    if (!header)
++        goto error;
++
++    pgpsig = headerFormat(header, "%{SIGGPG:pgpsig}", &errmsg);
++    if (!pgpsig && errmsg)
+     {
+-        rpmTag rpmTags[] = { RPMTAG_DSAHEADER, RPMTAG_RSAHEADER, RPMTAG_SHA1HEADER };
+-        int ii;
+-        for (ii = 0; ii < 3; ii++)
++        VERB1 log("cannot get siggpg:pgpsig. reason: %s", errmsg);
++        goto error;
++    }
++
++    {
++        char *pgpsig_tmp = strstr(pgpsig, " Key ID ");
++        if (pgpsig_tmp)
+         {
+-            if (headerIsEntry(header, rpmTags[ii]))
+-            {
+-                rpmtd td = rpmtdNew();
+-                headerGet(header, rpmTags[ii] , td, HEADERGET_DEFAULT);
+-                char* pgpsig = rpmtdFormat(td, RPMTD_FORMAT_PGPSIG , NULL);
+-                rpmtdFree(td);
+-                if (pgpsig)
+-                {
+-                    std::string PGPSignatureText = pgpsig;
+-                    free(pgpsig);
+-
+-                    size_t Key_ID_pos = PGPSignatureText.find(" Key ID ");
+-                    if (Key_ID_pos != std::string::npos)
+-                    {
+-                        std::string headerFingerprint = PGPSignatureText.substr(Key_ID_pos + sizeof (" Key ID ") - 1);
+-
+-                        if (headerFingerprint != "")
+-                        {
+-                            if (m_setFingerprints.find(headerFingerprint) != m_setFingerprints.end())
+-                            {
+-                                ret = true;
+-                                break;
+-                            }
+-                        }
+-                    }
+-                }
+-            }
++            pgpsig_tmp += sizeof(" Key ID ") - 1;
++            ret = g_list_find(list_fingerprints, pgpsig_tmp) != NULL;
+         }
+     }
++
++error:
++    free(pgpsig);
+     rpmdbFreeIterator(iter);
+     rpmtsFree(ts);
+     return ret;
+ }
+ 
++/*
++  Checking the MD5 sum requires to run prelink to "un-prelink" the
++  binaries - this is considered potential security risk so we don't
++  use it, until we find some non-intrusive way
++*/
++
++/*
++ * Not woking, need to be rewriten
++ *
+ bool CheckHash(const char* pPackage, const char* pPath)
+ {
+-    bool ret = false;
++    bool ret = true;
+     rpmts ts = rpmtsCreate();
+     rpmdbMatchIterator iter = rpmtsInitIterator(ts, RPMTAG_NAME, pPackage, 0);
+     Header header = rpmdbNextIterator(iter);
+-    if (header != NULL)
+-    {
+-        rpmfi fi = rpmfiNew(ts, header, RPMTAG_BASENAMES, RPMFI_NOHEADER);
+-        pgpHashAlgo hashAlgo;
+-        std::string headerHash;
+-        char computedHash[1024] = "";
++    if (header == NULL)
++        goto error;
+ 
+-        while (rpmfiNext(fi) != -1)
++    rpmfi fi = rpmfiNew(ts, header, RPMTAG_BASENAMES, RPMFI_NOHEADER);
++    pgpHashAlgo hashAlgo;
++    std::string headerHash;
++    char computedHash[1024] = "";
++
++    while (rpmfiNext(fi) != -1)
++    {
++        if (strcmp(pPath, rpmfiFN(fi)) == 0)
+         {
+-            if (strcmp(pPath, rpmfiFN(fi)) == 0)
+-            {
+-                headerHash = rpmfiFDigestHex(fi, &hashAlgo);
+-                rpmDoDigest(hashAlgo, pPath, 1, (unsigned char*) computedHash, NULL);
+-                ret = (headerHash != "" && headerHash == computedHash);
+-                break;
+-            }
++            headerHash = rpmfiFDigestHex(fi, &hashAlgo);
++            rpmDoDigest(hashAlgo, pPath, 1, (unsigned char*) computedHash, NULL);
++            ret = (headerHash != "" && headerHash == computedHash);
++            break;
+         }
+-        rpmfiFree(fi);
+     }
++    rpmfiFree(fi);
++error:
+     rpmdbFreeIterator(iter);
+     rpmtsFree(ts);
+     return ret;
+ }
++*/
+ 
+-std::string GetDescription(const char* pPackage)
++char* rpm_get_description(const char* pkg)
+ {
+-    std::string pDescription;
++    char *dsc = NULL;
++    const char *errmsg = NULL;
+     rpmts ts = rpmtsCreate();
+-    rpmdbMatchIterator iter = rpmtsInitIterator(ts, RPMTAG_NAME, pPackage, 0);
++
++    rpmdbMatchIterator iter = rpmtsInitIterator(ts, RPMTAG_NAME, pkg, 0);
+     Header header = rpmdbNextIterator(iter);
+-    if (header != NULL)
+-    {
+-        rpmtd td = rpmtdNew();
+-        headerGet(header, RPMTAG_SUMMARY, td, HEADERGET_DEFAULT);
+-        const char* summary = rpmtdGetString(td);
+-        headerGet(header, RPMTAG_DESCRIPTION, td, HEADERGET_DEFAULT);
+-        const char* description = rpmtdGetString(td);
+-        pDescription = summary + std::string("\n\n") + description;
+-        rpmtdFree(td);
+-    }
++    if (!header)
++        goto error;
++
++    dsc = headerFormat(header, "%{SUMMARY}\n\n%{DESCRIPTION}", &errmsg);
++    if (!dsc && errmsg)
++        error_msg("cannot get summary and description. reason: %s", errmsg);
++
++error:
+     rpmdbFreeIterator(iter);
+     rpmtsFree(ts);
+-    return pDescription;
++    return dsc;
+ }
+ 
+-std::string GetComponent(const char* pFileName)
++char* rpm_get_component(const char* filename)
+ {
+-    std::string ret;
+-    char *package_name;
++    char *ret = NULL;
++    char *srpm = NULL;
++    const char *errmsg = NULL;
++
+     rpmts ts = rpmtsCreate();
+-    rpmdbMatchIterator iter = rpmtsInitIterator(ts, RPMTAG_BASENAMES, pFileName, 0);
++    rpmdbMatchIterator iter = rpmtsInitIterator(ts, RPMTAG_BASENAMES, filename, 0);
+     Header header = rpmdbNextIterator(iter);
+-    if (header != NULL)
++    if (!header)
++        goto error;
++
++    srpm = headerFormat(header, "%{SOURCERPM}", &errmsg);
++    if (!srpm && errmsg)
+     {
+-        rpmtd td = rpmtdNew();
+-        headerGet(header, RPMTAG_SOURCERPM, td, HEADERGET_DEFAULT);
+-        const char * srpm = rpmtdGetString(td);
+-        if (srpm != NULL)
+-        {
+-            package_name = get_package_name_from_NVR_or_NULL(srpm);
+-            ret = std::string(package_name);
+-            free(package_name);
+-        }
+-        rpmtdFree(td);
++        error_msg("cannot get srpm. reason: %s", errmsg);
++        goto error;
+     }
+ 
++    ret = get_package_name_from_NVR_or_NULL(srpm);
++    free(srpm);
++
++error:
+     rpmdbFreeIterator(iter);
+     rpmtsFree(ts);
+     return ret;
+ }
+ 
+-char* GetPackage(const char* pFileName)
++// caller is responsible to free returned value
++char* rpm_get_package_nvr(const char* filename)
+ {
+-    char* ret = NULL;
++    char* nvr = NULL;
++    const char *errmsg = NULL;
++
+     rpmts ts = rpmtsCreate();
+-    rpmdbMatchIterator iter = rpmtsInitIterator(ts, RPMTAG_BASENAMES, pFileName, 0);
++    rpmdbMatchIterator iter = rpmtsInitIterator(ts, RPMTAG_BASENAMES, filename, 0);
+     Header header = rpmdbNextIterator(iter);
+-    if (header != NULL)
+-    {
+-        ret = headerGetNEVR(header, NULL);
+-    }
+ 
++    if (!header)
++        goto error;
++
++    nvr = headerFormat(header, "%{NAME}-%{VERSION}-%{RELEASE}", &errmsg);
++    if (!nvr && errmsg)
++        error_msg("cannot get nvr. reason: %s", errmsg);
++
++error:
+     rpmdbFreeIterator(iter);
+     rpmtsFree(ts);
+-    return ret;
++    return nvr;
+ }
+diff --git a/src/Daemon/RPM.h b/src/Daemon/RPM.h
+index 4df868d..6e034d2 100644
+--- a/src/Daemon/RPM.h
++++ b/src/Daemon/RPM.h
+@@ -25,72 +25,56 @@
+ #include <rpm/rpmcli.h>
+ #include <rpm/rpmts.h>
+ #include <rpm/rpmdb.h>
++#include <rpm/rpmpgp.h>
+ #include "abrt_types.h"
+ 
+ /**
+- * A class. It is used for additional checks of package, which contains
+- * crashed application.
++ * Checks if an application is modified by third party.
++ * @param pPackage A package name. The package contains the application.
++ * @param pPath A path to the application.
++ *
++ * Not used. Delete?
+  */
+-class CRPM
+-{
+-    private:
+-        /**
+-         * A context for librpm library.
+-         */
+-        poptContext m_poptContext;
+-        /**
+-         * A set, which contains finger prints.
+-         */
+-        set_string_t m_setFingerprints;
++//bool CheckHash(const char* pPackage, const char* pPath);
+ 
+-    public:
+-        /**
+-         * A constructior.
+-         */
+-        CRPM();
+-        /**
+-         * A destructor.
+-         */
+-        ~CRPM();
+-        /**
+-         * A method, which loads one GPG public key.
+-         * @param pFileName A path to the public key.
+-         */
+-        void LoadOpenGPGPublicKey(const char* pFileName);
+-        /**
+-         * A method, which checks if package's finger print is valid.
+-         * @param pPackage A package name.
+-         */
+-        bool CheckFingerprint(const char* pPackage);
+-};
++
++void rpm_init();
++
++void rpm_destroy();
+ 
+ /**
+- * Checks if an application is modified by third party.
+- * @param pPackage A package name. The package contains the application.
+- * @param pPath A path to the application.
++ * A function, which loads one GPG public key.
++ * @param filename A path to the public key.
++ */
++void rpm_load_gpgkey(const char* filename);
++
++/**
++ * A function, which checks if package's finger print is valid.
++ * @param pkg A package name.
+  */
+-bool CheckHash(const char* pPackage, const char* pPath);
++bool rpm_chk_fingerprint(const char* pkg);
++
+ /**
+  * Gets a package description.
+- * @param pPackage A package name.
++ * @param pkg A package name.
+  * @return A package description.
+  */
+-std::string GetDescription(const char* pPackage);
++char* rpm_get_description(const char* pkg);
+ /**
+  * Gets a package name. This package contains particular
+  * file. If the file doesn't belong to any package, empty string is
+  * returned.
+- * @param pFileName A file name.
+- * @return A package name (malloced string)
++ * @param filename A file name.
++ * @return A package name (malloc'ed string)
+  */
+-char* GetPackage(const char* pFileName);
++char* rpm_get_package_nvr(const char* filename);
+ /**
+  * Finds a main package for given file. This package contains particular
+  * file. If the file doesn't belong to any package, empty string is
+  * returned.
+- * @param pFileName A file name.
+- * @return A package name.
++ * @param filename A file name.
++ * @return a malloc'ed package name. Need to be freed.
+  */
+-std::string GetComponent(const char* pFileName);
++char* rpm_get_component(const char* filename);
+ 
+ #endif
+commit 32caeb733d821d23ae062f8f01c9c560ce238729
+Author: Nikola Pajkovsky <npajkovs@redhat.com>
+Date:   Mon Aug 23 15:25:41 2010 +0200
+
+    rpm.c: fix some memleaks
+    
+    Signed-off-by: Nikola Pajkovsky <npajkovs@redhat.com>
+
+diff --git a/src/daemon/rpm.c b/src/daemon/rpm.c
+index ce8da69..f9474d6 100644
+--- a/src/Daemon/RPM.cpp
++++ b/src/Daemon/RPM.cpp
+@@ -45,6 +45,7 @@ void rpm_destroy()
+ {
+     rpmFreeRpmrc();
+     rpmFreeCrypto();
++    rpmFreeMacros(NULL);
+ 
+     g_list_foreach(list_fingerprints, list_free, NULL);
+     g_list_free(list_fingerprints);
